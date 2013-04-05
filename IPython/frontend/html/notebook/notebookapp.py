@@ -33,6 +33,7 @@ import webbrowser
 
 # Third party
 import zmq
+from jinja2 import Environment, FileSystemLoader
 
 # Install the pyzmq ioloop. This has to be done before anything else from
 # tornado is imported.
@@ -60,15 +61,16 @@ from IPython.config.application import catch_config_error, boolean_flag
 from IPython.core.application import BaseIPythonApplication
 from IPython.core.profiledir import ProfileDir
 from IPython.frontend.consoleapp import IPythonConsoleApp
-from IPython.lib.kernel import swallow_argv
-from IPython.zmq.session import Session, default_secure
-from IPython.zmq.zmqshell import ZMQInteractiveShell
-from IPython.zmq.ipkernel import (
-    flags as ipkernel_flags,
-    aliases as ipkernel_aliases,
+from IPython.kernel import swallow_argv
+from IPython.kernel.zmq.session import Session, default_secure
+from IPython.kernel.zmq.zmqshell import ZMQInteractiveShell
+from IPython.kernel.zmq.kernelapp import (
+    kernel_flags,
+    kernel_aliases,
     IPKernelApp
 )
 from IPython.utils.importstring import import_item
+from IPython.utils.localinterfaces import LOCALHOST
 from IPython.utils.traitlets import (
     Dict, Unicode, Integer, List, Enum, Bool,
     DottedObjectName
@@ -86,9 +88,6 @@ _notebook_id_regex = r"(?P<notebook_id>\w+-\w+-\w+-\w+-\w+)"
 _profile_regex = r"(?P<profile>[^\/]+)" # there is almost no text that is invalid
 _cluster_action_regex = r"(?P<action>start|stop)"
 
-
-LOCALHOST = '127.0.0.1'
-
 _examples = """
 ipython notebook                       # start the notebook
 ipython notebook --profile=sympy       # use the sympy profile
@@ -96,6 +95,9 @@ ipython notebook --pylab=inline        # pylab in inline plotting mode
 ipython notebook --certfile=mycert.pem # use SSL/TLS certificate
 ipython notebook --port=5555 --ip=*    # Listen on port 5555, all interfaces
 """
+
+# Packagers: modify this line if you store the notebook static files elsewhere
+DEFAULT_STATIC_FILES_PATH = os.path.join(os.path.dirname(__file__), "static")
 
 #-----------------------------------------------------------------------------
 # Helper functions
@@ -124,7 +126,7 @@ def random_ports(port, n):
 
 class NotebookWebApplication(web.Application):
 
-    def __init__(self, ipython_app, kernel_manager, notebook_manager, 
+    def __init__(self, ipython_app, kernel_manager, notebook_manager,
                  cluster_manager, log,
                  base_project_url, settings_overrides):
         handlers = [
@@ -163,8 +165,9 @@ class NotebookWebApplication(web.Application):
             template_path=os.path.join(os.path.dirname(__file__), "templates"),
             static_path=ipython_app.static_file_path,
             static_handler_class = FileFindHandler,
+            static_url_prefix = url_path_join(base_project_url,'/static/'),
             cookie_secret=os.urandom(1024),
-            login_url="%s/login"%(base_project_url.rstrip('/')),
+            login_url=url_path_join(base_project_url,'/login'),
             cookie_name='username-%s' % uuid.uuid4(),
         )
 
@@ -185,14 +188,18 @@ class NotebookWebApplication(web.Application):
         self.cluster_manager = cluster_manager
         self.ipython_app = ipython_app
         self.read_only = self.ipython_app.read_only
+        self.config = self.ipython_app.config
+        self.use_less = self.ipython_app.use_less
         self.log = log
+        self.jinja2_env = Environment(loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates")))
+
 
 
 #-----------------------------------------------------------------------------
 # Aliases and Flags
 #-----------------------------------------------------------------------------
 
-flags = dict(ipkernel_flags)
+flags = dict(kernel_flags)
 flags['no-browser']=(
     {'NotebookApp' : {'open_browser' : False}},
     "Don't open the notebook in a browser after startup."
@@ -231,12 +238,13 @@ flags.update(boolean_flag('script', 'FileNotebookManager.save_script',
 # or it will raise an error on unrecognized flags
 notebook_flags = ['no-browser', 'no-mathjax', 'read-only', 'script', 'no-script']
 
-aliases = dict(ipkernel_aliases)
+aliases = dict(kernel_aliases)
 
 aliases.update({
     'ip': 'NotebookApp.ip',
     'port': 'NotebookApp.port',
     'port-retries': 'NotebookApp.port_retries',
+    'transport': 'KernelManager.transport',
     'keyfile': 'NotebookApp.keyfile',
     'certfile': 'NotebookApp.certfile',
     'notebook-dir': 'NotebookManager.notebook_dir',
@@ -339,7 +347,19 @@ class NotebookApp(BaseIPythonApplication):
     read_only = Bool(False, config=True,
         help="Whether to prevent editing/execution of notebooks."
     )
-    
+
+    use_less = Bool(False, config=True,
+                       help="""Wether to use Browser Side less-css parsing
+                       instead of compiled css version in templates that allows
+                       it. This is mainly convenient when working on the less
+                       file to avoid a build step, or if user want to overwrite
+                       some of the less variables without having to recompile
+                       everything.
+                       
+                       You will need to install the less.js component in the static directory
+                       either in the source tree or in your profile folder.
+                       """)
+
     webapp_settings = Dict(config=True,
             help="Supply overrides for the tornado.web.Application that the "
                  "IPython notebook uses.")
@@ -360,13 +380,33 @@ class NotebookApp(BaseIPythonApplication):
             self.mathjax_url = u''
 
     base_project_url = Unicode('/', config=True,
-                               help='''The base URL for the notebook server''')
+                               help='''The base URL for the notebook server.
+
+                               Leading and trailing slashes can be omitted,
+                               and will automatically be added.
+                               ''')
+    def _base_project_url_changed(self, name, old, new):
+        if not new.startswith('/'):
+            self.base_project_url = '/'+new
+        elif not new.endswith('/'):
+            self.base_project_url = new+'/'
+
     base_kernel_url = Unicode('/', config=True,
-                               help='''The base URL for the kernel server''')
+                               help='''The base URL for the kernel server
+
+                               Leading and trailing slashes can be omitted,
+                               and will automatically be added.
+                               ''')
+    def _base_kernel_url_changed(self, name, old, new):
+        if not new.startswith('/'):
+            self.base_kernel_url = '/'+new
+        elif not new.endswith('/'):
+            self.base_kernel_url = new+'/'
+
     websocket_host = Unicode("", config=True,
         help="""The hostname for the websocket server."""
     )
-    
+
     extra_static_paths = List(Unicode, config=True,
         help="""Extra paths to search for serving static files.
         
@@ -379,7 +419,7 @@ class NotebookApp(BaseIPythonApplication):
     @property
     def static_file_path(self):
         """return extra paths + the default location"""
-        return self.extra_static_paths + [os.path.join(os.path.dirname(__file__), "static")]
+        return self.extra_static_paths + [DEFAULT_STATIC_FILES_PATH]
 
     mathjax_url = Unicode("", config=True,
         help="""The url for MathJax.js."""
@@ -424,7 +464,7 @@ class NotebookApp(BaseIPythonApplication):
         # Scrub frontend-specific flags
         self.kernel_argv = swallow_argv(argv, notebook_aliases, notebook_flags)
         # Kernel should inherit default config file from frontend
-        self.kernel_argv.append("--KernelApp.parent_appname='%s'"%self.name)
+        self.kernel_argv.append("--IPKernelApp.parent_appname='%s'" % self.name)
 
         if self.extra_args:
             f = os.path.abspath(self.extra_args[0])
@@ -444,7 +484,6 @@ class NotebookApp(BaseIPythonApplication):
         )
         kls = import_item(self.notebook_manager_class)
         self.notebook_manager = kls(config=self.config, log=self.log)
-        self.notebook_manager.log_info()
         self.notebook_manager.load_notebook_names()
         self.cluster_manager = ClusterManager(config=self.config, log=self.log)
         self.cluster_manager.update_profiles()
@@ -470,11 +509,14 @@ class NotebookApp(BaseIPythonApplication):
             ssl_options = None
         self.web_app.password = self.password
         self.http_server = httpserver.HTTPServer(self.web_app, ssl_options=ssl_options)
-        if ssl_options is None and not self.ip and not (self.read_only and not self.password):
-            self.log.critical('WARNING: the notebook server is listening on all IP addresses '
-                              'but not using any encryption or authentication. This is highly '
-                              'insecure and not recommended.')
-
+        if not self.ip:
+            warning = "WARNING: The notebook server is listening on all IP addresses"
+            if ssl_options is None:
+                self.log.critical(warning + " and not using encryption. This"
+                    "is not recommended.")
+            if not self.password and not self.read_only:
+                self.log.critical(warning + "and not using authentication."
+                    "This is highly insecure and not recommended.")
         success = None
         for port in random_ports(self.port, self.port_retries+1):
             try:
@@ -508,6 +550,12 @@ class NotebookApp(BaseIPythonApplication):
             # but it will work
             signal.signal(signal.SIGINT, self._handle_sigint)
         signal.signal(signal.SIGTERM, self._signal_stop)
+        if hasattr(signal, 'SIGUSR1'):
+            # Windows doesn't support SIGUSR1
+            signal.signal(signal.SIGUSR1, self._signal_info)
+        if hasattr(signal, 'SIGINFO'):
+            # only on BSD-based systems
+            signal.signal(signal.SIGINFO, self._signal_info)
     
     def _handle_sigint(self, sig, frame):
         """SIGINT handler spawns confirmation dialog"""
@@ -533,7 +581,10 @@ class NotebookApp(BaseIPythonApplication):
         """
         # FIXME: remove this delay when pyzmq dependency is >= 2.1.11
         time.sleep(0.1)
-        sys.stdout.write("Shutdown Notebook Server (y/[n])? ")
+        info = self.log.info
+        info('interrupted')
+        print self.notebook_info()
+        sys.stdout.write("Shutdown this notebook server (y/[n])? ")
         sys.stdout.flush()
         r,w,x = select.select([sys.stdin], [], [], 5)
         if r:
@@ -554,6 +605,9 @@ class NotebookApp(BaseIPythonApplication):
     def _signal_stop(self, sig, frame):
         self.log.critical("received signal %s, stopping", sig)
         ioloop.IOLoop.instance().stop()
+
+    def _signal_info(self, sig, frame):
+        print self.notebook_info()
     
     @catch_config_error
     def initialize(self, argv=None):
@@ -564,27 +618,35 @@ class NotebookApp(BaseIPythonApplication):
         self.init_signal()
 
     def cleanup_kernels(self):
-        """shutdown all kernels
+        """Shutdown all kernels.
         
         The kernels will shutdown themselves when this process no longer exists,
         but explicit shutdown allows the KernelManagers to cleanup the connection files.
         """
         self.log.info('Shutting down kernels')
-        km = self.kernel_manager
-        # copy list, since shutdown_kernel deletes keys
-        for kid in list(km.kernel_ids):
-            km.shutdown_kernel(kid)
+        self.kernel_manager.shutdown_all()
+
+    def notebook_info(self):
+        "Return the current working directory and the server url information"
+        mgr_info = self.notebook_manager.info_string() + "\n"
+        return mgr_info +"The IPython Notebook is running at: %s" % self._url
 
     def start(self):
+        """ Start the IPython Notebok server app, after initialization
+        
+        This method takes no arguments so all configuration and initialization
+        must be done prior to calling this method."""
         ip = self.ip if self.ip else '[all ip addresses on your system]'
         proto = 'https' if self.certfile else 'http'
         info = self.log.info
-        info("The IPython Notebook is running at: %s://%s:%i%s" %
-             (proto, ip, self.port,self.base_project_url) )
+        self._url = "%s://%s:%i%s" % (proto, ip, self.port,
+                                      self.base_project_url)
+        for line in self.notebook_info().split("\n"):
+            info(line)
         info("Use Control-C to stop this server and shut down all kernels.")
 
         if self.open_browser or self.file_to_run:
-            ip = self.ip or '127.0.0.1'
+            ip = self.ip or LOCALHOST
             try:
                 browser = webbrowser.get(self.browser or None)
             except webbrowser.Error as e:

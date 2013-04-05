@@ -107,7 +107,6 @@ skip_doctest = True
 # Imports
 #-----------------------------------------------------------------------------
 
-import imp
 import os
 import sys
 import traceback
@@ -120,22 +119,12 @@ try:
 except NameError:
     from imp import reload
 
-from IPython.utils import pyfile
+from IPython.utils import openpy
 from IPython.utils.py3compat import PY3
 
 #------------------------------------------------------------------------------
 # Autoreload functionality
 #------------------------------------------------------------------------------
-
-def _get_compiled_ext():
-    """Official way to get the extension of compiled files (.pyc or .pyo)"""
-    for ext, mode, typ in imp.get_suffixes():
-        if typ == imp.PY_COMPILED:
-            return ext
-
-
-PY_COMPILED_EXT = _get_compiled_ext()
-
 
 class ModuleReloader(object):
     enabled = False
@@ -218,13 +207,12 @@ class ModuleReloader(object):
             path, ext = os.path.splitext(filename)
 
             if ext.lower() == '.py':
-                ext = PY_COMPILED_EXT
-                pyc_filename = pyfile.cache_from_source(filename)
+                pyc_filename = openpy.cache_from_source(filename)
                 py_filename = filename
             else:
                 pyc_filename = filename
                 try:
-                    py_filename = pyfile.source_from_cache(filename)
+                    py_filename = openpy.source_from_cache(filename)
                 except ValueError:
                     continue
 
@@ -322,7 +310,7 @@ else:
                          (lambda a, b: isinstance2(a, b, types.MethodType),
                           lambda a, b: update_function(a.im_func, b.im_func)),
                         ])
-        
+
 
 def update_generic(a, b):
     for type_check, update in UPDATE_RULES:

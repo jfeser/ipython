@@ -20,7 +20,10 @@ import re
 try:
     import sqlite3
 except ImportError:
-    sqlite3 = None
+    try:
+        from pysqlite2 import dbapi2 as sqlite3
+    except ImportError:
+        sqlite3 = None
 import threading
 
 # Our own packages
@@ -171,7 +174,7 @@ class HistoryAccessor(Configurable):
             self.hist_file = self._get_hist_file_name(profile)
 
         if sqlite3 is None and self.enabled:
-            warn("IPython History requires SQLite, your history will not be saved\n")
+            warn("IPython History requires SQLite, your history will not be saved")
             self.enabled = False
         
         self.init_db()
@@ -307,7 +310,7 @@ class HistoryAccessor(Configurable):
 
     @catch_corrupt_db
     def search(self, pattern="*", raw=True, search_raw=True,
-               output=False, n=None):
+               output=False, n=None, unique=False):
         """Search the database using unix glob-style matching (wildcards
         * and ?).
 
@@ -322,6 +325,8 @@ class HistoryAccessor(Configurable):
         n : None or int
           If an integer is given, it defines the limit of
           returned entries.
+        unique : bool
+          When it is true, return only unique entries.
 
         Returns
         -------
@@ -333,9 +338,13 @@ class HistoryAccessor(Configurable):
         self.writeout_cache()
         sqlform = "WHERE %s GLOB ?" % tosearch
         params = (pattern,)
+        if unique:
+            sqlform += ' GROUP BY {0}'.format(tosearch)
         if n is not None:
             sqlform += " ORDER BY session DESC, line DESC LIMIT ?"
             params += (n,)
+        elif unique:
+            sqlform += " ORDER BY session, line"
         cur = self._run_sql(sqlform, params, raw=raw, output=output)
         if n is not None:
             return reversed(list(cur))
@@ -739,7 +748,7 @@ class HistorySavingThread(threading.Thread):
 # To match, e.g. ~5/8-~2/3
 range_re = re.compile(r"""
 ((?P<startsess>~?\d+)/)?
-(?P<start>\d+)                    # Only the start line num is compulsory
+(?P<start>\d+)?
 ((?P<sep>[\-:])
  ((?P<endsess>~?\d+)/)?
  (?P<end>\d+))?
@@ -758,16 +767,25 @@ def extract_hist_ranges(ranges_str):
         rmatch = range_re.match(range_str)
         if not rmatch:
             continue
-        start = int(rmatch.group("start"))
-        end = rmatch.group("end")
-        end = int(end) if end else start+1   # If no end specified, get (a, a+1)
+        start = rmatch.group("start")
+        if start:
+            start = int(start)
+            end = rmatch.group("end")
+            # If no end specified, get (a, a + 1)
+            end = int(end) if end else start + 1
+        else:  # start not specified
+            if not rmatch.group('startsess'):  # no startsess
+                continue
+            start = 1
+            end = None  # provide the entire session hist
+
         if rmatch.group("sep") == "-":       # 1-3 == 1:4 --> [1, 2, 3]
             end += 1
         startsess = rmatch.group("startsess") or "0"
         endsess = rmatch.group("endsess") or startsess
         startsess = int(startsess.replace("~","-"))
         endsess = int(endsess.replace("~","-"))
-        assert endsess >= startsess
+        assert endsess >= startsess, "start session must be earlier than end session"
 
         if endsess == startsess:
             yield (startsess, start, end)

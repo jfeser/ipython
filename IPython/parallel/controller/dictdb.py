@@ -103,11 +103,12 @@ class DictDB(BaseDB):
     _culled_ids = set() # set of ids which have been culled
     _buffer_bytes = Integer(0) # running total of the bytes in the DB
     
-    size_limit = Integer(1024*1024, config=True,
+    size_limit = Integer(1024**3, config=True,
         help="""The maximum total size (in bytes) of the buffers stored in the db
         
         When the db exceeds this size, the oldest records will be culled until
         the total size is under size_limit * (1-cull_fraction).
+        default: 1 GB
         """
     )
     record_limit = Integer(1024, config=True,
@@ -266,6 +267,10 @@ class DictDB(BaseDB):
     def get_history(self):
         """get all msg_ids, ordered by time submitted."""
         msg_ids = self._records.keys()
+        # Remove any that do not have a submitted timestamp.
+        # This is extremely unlikely to happen,
+        # but it seems to come up in some tests on VMs.
+        msg_ids = [ m for m in msg_ids if self._records[m]['submitted'] is not None ]
         return sorted(msg_ids, key=lambda m: self._records[m]['submitted'])
 
 

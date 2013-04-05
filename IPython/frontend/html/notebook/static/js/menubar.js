@@ -9,15 +9,44 @@
 // MenuBar
 //============================================================================
 
+/**
+ * @module IPython
+ * @namespace IPython
+ * @submodule MenuBar
+ */
+
+
 var IPython = (function (IPython) {
 
-    var MenuBar = function (selector) {
+    /**
+     * A MenuBar Class to generate the menubar of IPython noteboko
+     * @Class MenuBar
+     *
+     * @constructor
+     *
+     *
+     * @param selector {string} selector for the menubar element in DOM
+     * @param {object} [options]
+     *      @param [options.baseProjectUrl] {String} String to use for the
+     *      Base Project url, default would be to inspect
+     *      $('body').data('baseProjectUrl');
+     *      does not support change for now is set through this option
+     */
+    var MenuBar = function (selector, options) {
+        var options = options || {};
+        if(options.baseProjectUrl!= undefined){
+            this._baseProjectUrl = options.baseProjectUrl;
+        }
         this.selector = selector;
         if (this.selector !== undefined) {
             this.element = $(selector);
             this.style();
             this.bind_events();
         }
+    };
+
+    MenuBar.prototype.baseProjectUrl = function(){
+        return this._baseProjectUrl || $('body').data('baseProjectUrl');
     };
 
 
@@ -36,18 +65,19 @@ var IPython = (function (IPython) {
 
     MenuBar.prototype.bind_events = function () {
         //  File
+        var that = this;
         this.element.find('#new_notebook').click(function () {
-            window.open($('body').data('baseProjectUrl')+'new');
+            window.open(that.baseProjectUrl()+'new');
         });
         this.element.find('#open_notebook').click(function () {
-            window.open($('body').data('baseProjectUrl'));
+            window.open(that.baseProjectUrl());
         });
         this.element.find('#rename_notebook').click(function () {
             IPython.save_widget.rename_notebook();
         });
         this.element.find('#copy_notebook').click(function () {
             var notebook_id = IPython.notebook.get_notebook_id();
-            var url = $('body').data('baseProjectUrl') + notebook_id + '/copy';
+            var url = that.baseProjectUrl() + notebook_id + '/copy';
             window.open(url,'_blank');
             return false;
         });
@@ -56,15 +86,15 @@ var IPython = (function (IPython) {
         });
         this.element.find('#download_ipynb').click(function () {
             var notebook_id = IPython.notebook.get_notebook_id();
-            var url = $('body').data('baseProjectUrl') + 'notebooks/' +
+            var url = that.baseProjectUrl() + 'notebooks/' +
                       notebook_id + '?format=json';
-            window.open(url,'_newtab');
+            window.location.assign(url);
         });
         this.element.find('#download_py').click(function () {
             var notebook_id = IPython.notebook.get_notebook_id();
-            var url = $('body').data('baseProjectUrl') + 'notebooks/' +
+            var url = that.baseProjectUrl() + 'notebooks/' +
                       notebook_id + '?format=py';
-            window.open(url,'_newtab');
+            window.location.assign(url);
         });
         this.element.find('button#print_notebook').click(function () {
             IPython.print_widget.print_notebook();
@@ -82,6 +112,9 @@ var IPython = (function (IPython) {
         });
         this.element.find('#delete_cell').click(function () {
             IPython.notebook.delete_cell();
+        });
+        this.element.find('#undelete_cell').click(function () {
+            IPython.notebook.undelete();
         });
         this.element.find('#split_cell').click(function () {
             IPython.notebook.split_cell();

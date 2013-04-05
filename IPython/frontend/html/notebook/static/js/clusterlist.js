@@ -20,6 +20,10 @@ var IPython = (function (IPython) {
         }
     };
 
+    ClusterList.prototype.baseProjectUrl = function(){
+        return this._baseProjectUrl || $('body').data('baseProjectUrl');
+    };
+
     ClusterList.prototype.style = function () {
         $('#cluster_toolbar').addClass('list_toolbar');
         $('#cluster_list_info').addClass('toolbar_info');
@@ -52,7 +56,7 @@ var IPython = (function (IPython) {
             dataType : "json",
             success : $.proxy(this.load_list_success, this)
         };
-        var url = $('body').data('baseProjectUrl') + 'clusters';
+        var url = this.baseProjectUrl() + 'clusters';
         $.ajax(url, settings);
     };
 
@@ -80,6 +84,11 @@ var IPython = (function (IPython) {
         this.style();
     };
 
+    ClusterItem.prototype.baseProjectUrl = function(){
+        return this._baseProjectUrl || $('body').data('baseProjectUrl');
+    };
+
+
 
     ClusterItem.prototype.style = function () {
         this.element.addClass('list_item ui-widget ui-widget-content ui-helper-clearfix');
@@ -103,8 +112,10 @@ var IPython = (function (IPython) {
         var profile_col = $('<span/>').addClass('profile_col').text(this.data.profile);
         var status_col = $('<span/>').addClass('status_col').html('stopped');
         var engines_col = $('<span/>').addClass('engines_col');
-        var input = $('<input/>').attr('type','text').
-                attr('size',3).addClass('engine_num_input');
+        var input = $('<input/>').attr('type','number')
+                .attr('min',1)
+                .attr('size',3)
+                .addClass('engine_num_input');
         engines_col.append(input);
         var action_col = $('<span/>').addClass('action_col');
         var start_button = $('<button>Start</button>').button();
@@ -131,7 +142,7 @@ var IPython = (function (IPython) {
                     }
                 };
                 status_col.html('starting');
-                var url = $('body').data('baseProjectUrl') + 'clusters/' + that.data.profile + '/start';
+                var url = that.baseProjectUrl() + 'clusters/' + that.data.profile + '/start';
                 $.ajax(url, settings);
             };
         });
@@ -165,7 +176,7 @@ var IPython = (function (IPython) {
                 }
             };
             status_col.html('stopping')
-            var url = $('body').data('baseProjectUrl') + 'clusters/' + that.data.profile + '/stop';
+            var url = that.baseProjectUrl() + 'clusters/' + that.data.profile + '/stop';
             $.ajax(url, settings);
         });
     };

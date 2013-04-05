@@ -48,7 +48,6 @@ from IPython.core.shellapp import (
     InteractiveShellApp, shell_flags, shell_aliases
 )
 from IPython.frontend.terminal.interactiveshell import TerminalInteractiveShell
-from IPython.lib import inputhook
 from IPython.utils import warn
 from IPython.utils.path import get_ipython_dir, check_for_old_config
 from IPython.utils.traitlets import (
@@ -92,7 +91,7 @@ class IPAppCrashHandler(CrashHandler):
     """sys.excepthook for IPython itself, leaves a detailed report on disk."""
 
     def __init__(self, app):
-        contact_name = release.authors['Fernando'][0]
+        contact_name = release.author
         contact_email = release.author_email
         bug_tracker = 'https://github.com/ipython/ipython/issues'
         super(IPAppCrashHandler,self).__init__(
@@ -233,7 +232,7 @@ class TerminalIPythonApp(BaseIPythonApplication, InteractiveShellApp):
         profile = ("IPython.core.profileapp.ProfileApp",
             "Create and manage IPython profiles."
         ),
-        kernel = ("IPython.zmq.ipkernel.IPKernelApp",
+        kernel = ("IPython.kernel.zmq.kernelapp.IPKernelApp",
             "Start a kernel without an attached frontend."
         ),
         console=('IPython.frontend.terminal.console.app.ZMQTerminalIPythonApp',
@@ -241,6 +240,9 @@ class TerminalIPythonApp(BaseIPythonApplication, InteractiveShellApp):
         ),
         locate=('IPython.frontend.terminal.ipapp.LocateIPythonApp',
             LocateIPythonApp.description
+        ),
+        history=('IPython.core.historyapp.HistoryApp',
+            "Manage the IPython history database."
         ),
     ))
 
@@ -351,7 +353,7 @@ class TerminalIPythonApp(BaseIPythonApplication, InteractiveShellApp):
         """Replace --pylab='inline' with --pylab='auto'"""
         if new == 'inline':
             warn.warn("'inline' not available as pylab backend, "
-                      "using 'auto' instead.\n")
+                      "using 'auto' instead.")
             self.pylab = 'auto'
 
     def start(self):

@@ -71,7 +71,7 @@ IPython.utils = (function (IPython) {
             separator2, match, lastIndex, lastLength;
         str += ""; // Type-convert
 
-        compliantExecNpcg = typeof(/()??/.exec("")[1]) === "undefined"
+        var compliantExecNpcg = typeof(/()??/.exec("")[1]) === "undefined"
         if (!compliantExecNpcg) {
             // Doesn't need flags gy, but they don't hurt
             separator2 = new RegExp("^" + separator.source + "$(?!\\s)", flags);
@@ -157,7 +157,7 @@ IPython.utils = (function (IPython) {
 
 
     //Map from terminal commands to CSS classes
-    ansi_colormap = {
+    var ansi_colormap = {
         "30":"ansiblack", "31":"ansired",
         "32":"ansigreen", "33":"ansiyellow",
         "34":"ansiblue", "35":"ansipurple","36":"ansicyan",
@@ -198,7 +198,7 @@ IPython.utils = (function (IPython) {
     // Remove chunks that should be overridden by the effect of
     // carriage return characters
     function fixCarriageReturn(txt) {
-        tmp = txt;
+        var tmp = txt;
         do {
             txt = tmp;
             tmp = txt.replace(/\r+\n/gm, '\n'); // \r followed by \n --> newline
@@ -207,22 +207,10 @@ IPython.utils = (function (IPython) {
         return txt;
     }
 
-    // Locate URLs in plain text and wrap them in spaces so that they can be
-    // better picked out by autoLinkUrls even after the text has been
-    // converted to HTML
-    function wrapUrls(txt) {
-        // Note this regexp is a modified version of one from
-        // Markdown.Converter For now it only supports http(s) and ftp URLs,
-        // but could easily support others (though file:// should maybe be
-        // avoided)
-        var url_re = /(^|\W)(https?|ftp)(:\/\/[-A-Z0-9+&@#\/%?=~_|\[\]\(\)!:,\.;]*[-A-Z0-9+&@#\/%=~_|\[\]])($|\W)/gi;
-        return txt.replace(url_re, "$1 $2$3 $4");
-    }
-
-    // Locate a URL with spaces around it and convert that to a anchor tag
+    // Locate any URLs and convert them to a anchor tag
     function autoLinkUrls(txt) {
-        return txt.replace(/ ((https?|ftp):[^'">\s]+) /gi,
-            "<a target=\"_blank\" href=\"$1\">$1</a>");
+        return txt.replace(/(^|\s)(https?|ftp)(:[^'">\s]+)/gi,
+            "$1<a target=\"_blank\" href=\"$2$3\">$2$3</a>");
     }
 
     grow = function(element) {
@@ -269,14 +257,23 @@ IPython.utils = (function (IPython) {
     };
 
 
-    points_to_pixels = function (points) {
+    var points_to_pixels = function (points) {
         // A reasonably good way of converting between points and pixels.
         var test = $('<div style="display: none; width: 10000pt; padding:0; border:0;"></div>');
         $(body).append(test);
         var pixel_per_point = test.width()/10000;
         test.remove();
         return Math.floor(points*pixel_per_point);
-    }
+    };
+
+    // http://stackoverflow.com/questions/2400935/browser-detection-in-javascript
+    browser = (function() {
+        var N= navigator.appName, ua= navigator.userAgent, tem;
+        var M= ua.match(/(opera|chrome|safari|firefox|msie)\/?\s*(\.?\d+(\.\d+)*)/i);
+        if (M && (tem= ua.match(/version\/([\.\d]+)/i))!= null) M[2]= tem[1];
+        M= M? [M[1], M[2]]: [N, navigator.appVersion,'-?'];
+        return M;
+    })();
 
 
     return {
@@ -286,9 +283,10 @@ IPython.utils = (function (IPython) {
         keycodes : keycodes,
         grow : grow,
         fixCarriageReturn : fixCarriageReturn,
-        wrapUrls : wrapUrls,
         autoLinkUrls : autoLinkUrls,
-        points_to_pixels : points_to_pixels
+        points_to_pixels : points_to_pixels,
+        browser : browser    
     };
 
 }(IPython));
+

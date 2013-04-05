@@ -59,6 +59,8 @@ extensions = [
 if ON_RTD:
     # Remove extensions not currently supported on RTD
     extensions.remove('matplotlib.sphinxext.only_directives')
+    extensions.remove('matplotlib.sphinxext.mathmpl')
+    extensions.remove('matplotlib.sphinxext.plot_directive')
     extensions.remove('ipython_directive')
 
 # Add any paths that contain templates here, relative to this directory.
@@ -204,6 +206,19 @@ latex_documents = [
 
 # If false, no module index is generated.
 latex_use_modindex = True
+
+
+# Options for texinfo output
+# --------------------------
+
+texinfo_documents = [
+  (master_doc, 'ipython', 'IPython Documentation',
+   'The IPython Development Team',
+   'IPython',
+   'IPython Documentation',
+   'Programming',
+   1),
+]
 
 
 # Cleanup

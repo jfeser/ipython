@@ -25,7 +25,6 @@ from __future__ import with_statement
 
 import json
 import os
-import socket
 import stat
 import sys
 
@@ -45,27 +44,37 @@ from IPython.parallel.apps.baseapp import (
     catch_config_error,
 )
 from IPython.utils.importstring import import_item
+from IPython.utils.localinterfaces import LOCALHOST, PUBLIC_IPS
 from IPython.utils.traitlets import Instance, Unicode, Bool, List, Dict, TraitError
 
-from IPython.zmq.session import (
+from IPython.kernel.zmq.session import (
     Session, session_aliases, session_flags, default_secure
 )
 
 from IPython.parallel.controller.heartmonitor import HeartMonitor
 from IPython.parallel.controller.hub import HubFactory
 from IPython.parallel.controller.scheduler import TaskScheduler,launch_scheduler
-from IPython.parallel.controller.sqlitedb import SQLiteDB
+from IPython.parallel.controller.dictdb import DictDB
 
 from IPython.parallel.util import split_url, disambiguate_url
 
-# conditional import of MongoDB backend class
+# conditional import of SQLiteDB / MongoDB backend class
+real_dbs = []
+
+try:
+    from IPython.parallel.controller.sqlitedb import SQLiteDB
+except ImportError:
+    pass
+else:
+    real_dbs.append(SQLiteDB)
 
 try:
     from IPython.parallel.controller.mongodb import MongoDB
 except ImportError:
-    maybe_mongo = []
+    pass
 else:
-    maybe_mongo = [MongoDB]
+    real_dbs.append(MongoDB)
+
 
 
 #-----------------------------------------------------------------------------
@@ -148,7 +157,7 @@ class IPControllerApp(BaseParallelApplication):
     description = _description
     examples = _examples
     config_file_name = Unicode(default_config_file_name)
-    classes = [ProfileDir, Session, HubFactory, TaskScheduler, HeartMonitor, SQLiteDB] + maybe_mongo
+    classes = [ProfileDir, Session, HubFactory, TaskScheduler, HeartMonitor, DictDB] + real_dbs
     
     # change default to True
     auto_create = Bool(True, config=True,
@@ -220,13 +229,13 @@ class IPControllerApp(BaseParallelApplication):
         location = cdict['location']
         
         if not location:
-            try:
-                location = socket.gethostbyname_ex(socket.gethostname())[2][-1]
-            except (socket.gaierror, IndexError):
-                self.log.warn("Could not identify this machine's IP, assuming 127.0.0.1."
+            if PUBLIC_IPS:
+                location = PUBLIC_IPS[-1]
+            else:
+                self.log.warn("Could not identify this machine's IP, assuming %s."
                 " You may need to specify '--location=<external_ip_address>' to help"
-                " IPython decide when to connect via loopback.")
-                location = '127.0.0.1'
+                " IPython decide when to connect via loopback." % LOCALHOST)
+                location = LOCALHOST
             cdict['location'] = location
         fname = os.path.join(self.profile_dir.security_dir, fname)
         self.log.info("writing connection info to %s", fname)

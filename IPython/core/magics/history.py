@@ -16,7 +16,6 @@ from __future__ import print_function
 # Stdlib
 import os
 from io import open as io_open
-from IPython.external.argparse import Action
 
 # Our own packages
 from IPython.core.error import StdinNotImplementedError
@@ -89,6 +88,11 @@ class HistoryMagics(Magics):
         get the last n lines from all sessions. Specify n as a single
         arg, or the default is the last 10 lines.
         """)
+    @argument(
+        '-u', dest='unique', action='store_true',
+        help="""
+        when searching history using `-g`, show only unique history.
+        """)
     @argument('range', nargs='*')
     @skip_doctest
     @line_magic
@@ -100,12 +104,19 @@ class HistoryMagics(Magics):
 
         By default, all input history from the current session is displayed.
         Ranges of history can be indicated using the syntax:
-        4      : Line 4, current session
-        4-6    : Lines 4-6, current session
-        243/1-5: Lines 1-5, session 243
-        ~2/7   : Line 7, session 2 before current
-        ~8/1-~6/5 : From the first line of 8 sessions ago, to the fifth line
-                    of 6 sessions ago.
+        
+        ``4``
+            Line 4, current session
+        ``4-6``
+            Lines 4-6, current session
+        ``243/1-5``
+            Lines 1-5, session 243
+        ``~2/7``
+            Line 7, session 2 before current
+        ``~8/1-~6/5``
+            From the first line of 8 sessions ago, to the fifth line of 6
+            sessions ago.
+        
         Multiple ranges can be entered, separated by spaces
 
         The same syntax is used by %macro, %save, %edit, %rerun
@@ -121,10 +132,6 @@ class HistoryMagics(Magics):
 
         """
 
-        if not self.shell.displayhook.do_full_cache:
-            print('This feature is only available if numbered prompts '
-                  'are in use.')
-            return
         args = parse_argstring(self.history, parameter_s)
 
         # For brevity
@@ -169,7 +176,7 @@ class HistoryMagics(Magics):
             else:
                 pattern = "*"
             hist = history_manager.search(pattern, raw=raw, output=get_output,
-                                          n=limit)
+                                          n=limit, unique=args.unique)
             print_nums = True
         elif args.limit is not _unspecified:
             n = 10 if limit is None else limit

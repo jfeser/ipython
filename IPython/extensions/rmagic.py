@@ -178,8 +178,9 @@ class RMagics(Magics):
         return value
 
     @skip_doctest
+    @needs_local_scope
     @line_magic
-    def Rpush(self, line):
+    def Rpush(self, line, local_ns=None):
         '''
         A line-level magic for R that pushes
         variables from python to rpy2. The line should be made up
@@ -199,10 +200,23 @@ class RMagics(Magics):
             Out[11]: array([ 6.23333333])
 
         '''
+        if local_ns is None:
+            local_ns = {}
 
         inputs = line.split(' ')
         for input in inputs:
-            self.r.assign(input, self.pyconverter(self.shell.user_ns[input]))
+            try:
+                val = local_ns[input]
+            except KeyError:
+                try:
+                    val = self.shell.user_ns[input]
+                except KeyError:
+                    # reraise the KeyError as a NameError so that it looks like
+                    # the standard python behavior when you use an unnamed
+                    # variable
+                    raise NameError("name '%s' is not defined" % input)
+
+            self.r.assign(input, self.pyconverter(val))
 
     @skip_doctest
     @magic_arguments()
@@ -323,8 +337,12 @@ class RMagics(Magics):
         help='Convert these objects to data.frames and return as structured arrays.'
         )
     @argument(
-        '-u', '--units', type=int,
+        '-u', '--units', type=unicode, choices=["px", "in", "cm", "mm"],
         help='Units of png plotting device sent as an argument to *png* in R. One of ["px", "in", "cm", "mm"].'
+        )
+    @argument(
+        '-r', '--res', type=int,
+        help='Resolution of png plotting device sent as an argument to *png* in R. Defaults to 72 if *units* is one of ["in", "cm", "mm"].'
         )
     @argument(
         '-p', '--pointsize', type=int,
@@ -504,15 +522,23 @@ class RMagics(Magics):
                 try:
                     val = local_ns[input]
                 except KeyError:
-                    val = self.shell.user_ns[input]
+                    try:
+                        val = self.shell.user_ns[input]
+                    except KeyError:
+                        raise NameError("name '%s' is not defined" % input)
                 self.r.assign(input, self.pyconverter(val))
 
-        png_argdict = dict([(n, getattr(args, n)) for n in ['units', 'height', 'width', 'bg', 'pointsize']])
+        if getattr(args, 'units') is not None:
+            if args.units != "px" and getattr(args, 'res') is None:
+                args.res = 72
+            args.units = '"%s"' % args.units
+
+        png_argdict = dict([(n, getattr(args, n)) for n in ['units', 'res', 'height', 'width', 'bg', 'pointsize']])
         png_args = ','.join(['%s=%s' % (o,v) for o, v in png_argdict.items() if v is not None])
         # execute the R code in a temporary directory
 
         tmpd = tempfile.mkdtemp()
-        self.r('png("%s/Rplots%%03d.png",%s)' % (tmpd, png_args))
+        self.r('png("%s/Rplots%%03d.png",%s)' % (tmpd.replace('\\', '/'), png_args))
 
         text_output = ''
         if line_mode:
@@ -591,3 +617,7 @@ __doc__ = __doc__.format(
 def load_ipython_extension(ip):
     """Load the extension in IPython."""
     ip.register_magics(RMagics)
+    # Initialising rpy2 interferes with readline. Since, at this point, we've
+    # probably just loaded rpy2, we reset the delimiters. See issue gh-2759.
+    if ip.has_readline:
+        ip.readline.set_completer_delims(ip.readline_delims)

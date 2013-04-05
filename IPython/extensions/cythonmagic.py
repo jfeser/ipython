@@ -1,6 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-Cython related magics.
+=====================
+Cython related magics
+=====================
+
+Usage
+=====
+
+``%%cython``
+
+{CYTHON_DOC}
+
+``%%cython_inline``
+
+{CYTHON_INLINE_DOC}
+
+``%%cython_pyximport``
+
+{CYTHON_PYXIMPORT_DOC}
 
 Author:
 * Brian Granger
@@ -23,6 +40,11 @@ import os
 import re
 import sys
 import time
+
+try:
+    reload
+except NameError:   # Python 3
+    from imp import reload
 
 try:
     import hashlib
@@ -115,7 +137,7 @@ class CythonMagics(Magics):
              "Extension flag (can be specified  multiple times)."
     )
     @magic_arguments.argument(
-        '-la', '--link-args', action='append', default=[],
+        '--link-args', action='append', default=[],
         help="Extra flags to pass to linker via the `extra_link_args` "
              "Extension flag (can be specified  multiple times)."
     )
@@ -158,9 +180,15 @@ class CythonMagics(Magics):
         namespace. The usage is similar to that of `%%cython_pyximport` but
         you don't have to pass a module name::
 
-        %%cython
-        def f(x):
-            return 2.0*x
+            %%cython
+            def f(x):
+                return 2.0*x
+
+        To compile OpenMP codes, pass the required  `--compile-args`
+        and `--link-args`.  For example with gcc::
+
+            %%cython --compile-args=-fopenmp --link-args=-fopenmp
+            ...
         """
         args = magic_arguments.parse_argstring(self.cython, line)
         code = cell if cell.endswith('\n') else cell+'\n'
@@ -273,6 +301,11 @@ class CythonMagics(Magics):
         html = '\n'.join(l for l in html.splitlines() if not r.match(l))
         return html
 
+__doc__ = __doc__.format(
+                CYTHON_DOC = ' '*8 + CythonMagics.cython.__doc__,
+                CYTHON_INLINE_DOC = ' '*8 + CythonMagics.cython_inline.__doc__,
+                CYTHON_PYXIMPORT_DOC = ' '*8 + CythonMagics.cython_pyximport.__doc__,
+)
 
 def load_ipython_extension(ip):
     """Load the extension in IPython."""

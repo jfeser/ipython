@@ -19,6 +19,7 @@ Authors:
 import sys
 import platform
 import time
+from collections import namedtuple
 from tempfile import mktemp
 from StringIO import StringIO
 
@@ -42,6 +43,8 @@ from .clienttest import ClusterTestCase, crash, wait, skip_without
 
 def setup():
     add_engines(3, total=True)
+
+point = namedtuple("point", "x y")
 
 class TestView(ClusterTestCase, ParametricTestCase):
     
@@ -308,6 +311,21 @@ class TestView(ClusterTestCase, ParametricTestCase):
         self.assertEqual(R2.dtype, R.dtype)
         self.assertEqual(R2.shape, R.shape)
         assert_array_equal(R2, R)
+
+    @skip_without('pandas')
+    def test_push_pull_timeseries(self):
+        """push/pull pandas.TimeSeries"""
+        import pandas
+        
+        ts = pandas.TimeSeries(range(10))
+        
+        view = self.client[-1]
+        
+        view.push(dict(ts=ts), block=True)
+        rts = view['ts']
+        
+        self.assertEqual(type(rts), type(ts))
+        self.assertTrue((ts == rts).all())
     
     def test_map(self):
         view = self.client[:]
@@ -597,12 +615,42 @@ class TestView(ClusterTestCase, ParametricTestCase):
         ar = view.execute("1/0")
         ip = get_ipython()
         ip.user_ns['ar'] = ar
+
         with capture_output() as io:
             ip.run_cell("ar.get(2)")
         
-        self.assertEqual(io.stdout.count('ZeroDivisionError'), len(view) * 2, io.stdout)
-        self.assertEqual(io.stdout.count('by zero'), len(view), io.stdout)
-        self.assertEqual(io.stdout.count(':execute'), len(view), io.stdout)
+        count = min(error.CompositeError.tb_limit, len(view))
+        
+        self.assertEqual(io.stdout.count('ZeroDivisionError'), count * 2, io.stdout)
+        self.assertEqual(io.stdout.count('by zero'), count, io.stdout)
+        self.assertEqual(io.stdout.count(':execute'), count, io.stdout)
+    
+    def test_compositeerror_truncate(self):
+        """Truncate CompositeErrors with many exceptions"""
+        view = self.client[:]
+        msg_ids = []
+        for i in range(10):
+            ar = view.execute("1/0")
+            msg_ids.extend(ar.msg_ids)
+        
+        ar = self.client.get_result(msg_ids)
+        try:
+            ar.get()
+        except error.CompositeError as _e:
+            e = _e
+        else:
+            self.fail("Should have raised CompositeError")
+        
+        lines = e.render_traceback()
+        with capture_output() as io:
+            e.print_traceback()
+        
+        self.assertTrue("more exceptions" in lines[-1])
+        count = e.tb_limit
+        
+        self.assertEqual(io.stdout.count('ZeroDivisionError'), 2 * count, io.stdout)
+        self.assertEqual(io.stdout.count('by zero'), count, io.stdout)
+        self.assertEqual(io.stdout.count(':execute'), count, io.stdout)
     
     @dec.skipif_not_matplotlib
     def test_magic_pylab(self):
@@ -635,7 +683,7 @@ class TestView(ClusterTestCase, ParametricTestCase):
     def test_data_pub_single(self):
         view = self.client[-1]
         ar = view.execute('\n'.join([
-            'from IPython.zmq.datapub import publish_data',
+            'from IPython.kernel.zmq.datapub import publish_data',
             'for i in range(5):',
             '  publish_data(dict(i=i))'
         ]), block=False)
@@ -646,7 +694,7 @@ class TestView(ClusterTestCase, ParametricTestCase):
     def test_data_pub(self):
         view = self.client[:]
         ar = view.execute('\n'.join([
-            'from IPython.zmq.datapub import publish_data',
+            'from IPython.kernel.zmq.datapub import publish_data',
             'for i in range(5):',
             '  publish_data(dict(i=i))'
         ]), block=False)
@@ -720,3 +768,22 @@ class TestView(ClusterTestCase, ParametricTestCase):
         r = view.apply_sync(lambda x: x.b, ra)
         self.assertEqual(r, 0)
         self.assertEqual(view['a.b'], 0)
+    
+    def test_return_namedtuple(self):
+        def namedtuplify(x, y):
+            from IPython.parallel.tests.test_view import point
+            return point(x, y)
+        
+        view = self.client[-1]
+        p = view.apply_sync(namedtuplify, 1, 2)
+        self.assertEqual(p.x, 1)
+        self.assertEqual(p.y, 2)
+
+    def test_apply_namedtuple(self):
+        def echoxy(p):
+            return p.y, p.x
+        
+        view = self.client[-1]
+        tup = view.apply_sync(echoxy, point(1, 2))
+        self.assertEqual(tup, (2,1))
+

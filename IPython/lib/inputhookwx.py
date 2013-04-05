@@ -17,9 +17,8 @@ Authors:  Robin Dunn, Brian Granger, Ondrej Certik
 # Imports
 #-----------------------------------------------------------------------------
 
-import os
-import signal
 import sys
+import signal
 import time
 from timeit import default_timer as clock
 import wx
@@ -161,5 +160,11 @@ def inputhook_wx3():
         pass
     return 0
 
-# This is our default implementation
-inputhook_wx = inputhook_wx3
+if sys.platform == 'darwin':
+    # On OSX, evtloop.Pending() always returns True, regardless of there being
+    # any events pending. As such we can't use implementations 1 or 3 of the
+    # inputhook as those depend on a pending/dispatch loop.
+    inputhook_wx = inputhook_wx2
+else:
+    # This is our default implementation
+    inputhook_wx = inputhook_wx3

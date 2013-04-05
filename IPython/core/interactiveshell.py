@@ -14,7 +14,6 @@
 # Imports
 #-----------------------------------------------------------------------------
 
-from __future__ import with_statement
 from __future__ import absolute_import
 from __future__ import print_function
 
@@ -29,7 +28,6 @@ import runpy
 import sys
 import tempfile
 import types
-import urllib
 from io import open as io_open
 
 from IPython.config.configurable import SingletonConfigurable
@@ -42,7 +40,7 @@ from IPython.core import ultratb
 from IPython.core.alias import AliasManager, AliasError
 from IPython.core.autocall import ExitAutocall
 from IPython.core.builtin_trap import BuiltinTrap
-from IPython.core.compilerop import CachingCompiler
+from IPython.core.compilerop import CachingCompiler, check_linecache_ipython
 from IPython.core.display_trap import DisplayTrap
 from IPython.core.displayhook import DisplayHook
 from IPython.core.displaypub import DisplayPublisher
@@ -60,11 +58,12 @@ from IPython.core.profiledir import ProfileDir
 from IPython.core.pylabtools import pylab_activate
 from IPython.core.prompts import PromptManager
 from IPython.lib.latextools import LaTeXTool
+from IPython.testing.skipdoctest import skip_doctest
 from IPython.utils import PyColorize
 from IPython.utils import io
 from IPython.utils import py3compat
 from IPython.utils import openpy
-from IPython.utils.doctestreload import doctest_reload
+from IPython.utils.decorators import undoc
 from IPython.utils.io import ask_yes_no
 from IPython.utils.ipstruct import Struct
 from IPython.utils.path import get_home_dir, get_ipython_dir, get_py_filename, unquote_filename
@@ -90,6 +89,7 @@ dedent_re = re.compile(r'^\s+raise|^\s+return|^\s+pass')
 # Utilities
 #-----------------------------------------------------------------------------
 
+@undoc
 def softspace(file, newvalue):
     """Copied from code.py, to remove the dependency"""
 
@@ -105,9 +105,10 @@ def softspace(file, newvalue):
         pass
     return oldvalue
 
-
+@undoc
 def no_op(*a, **kw): pass
 
+@undoc
 class NoOpContext(object):
     def __enter__(self): pass
     def __exit__(self, type, value, traceback): pass
@@ -115,6 +116,7 @@ no_op_context = NoOpContext()
 
 class SpaceInInput(Exception): pass
 
+@undoc
 class Bunch: pass
 
 
@@ -192,6 +194,13 @@ class InteractiveShell(SingletonConfigurable):
     """An enhanced, interactive shell for Python."""
 
     _instance = None
+    
+    ast_transformers = List([], config=True, help=
+        """
+        A list of ast.NodeTransformer subclass instances, which will be applied
+        to user input before code is run.
+        """
+    )
 
     autocall = Enum((0,1,2), default_value=0, config=True, help=
         """
@@ -322,7 +331,7 @@ class InteractiveShell(SingletonConfigurable):
             'prompt_out' : 'out_template',
             'prompts_pad_left' : 'justify',
         }
-        warn("InteractiveShell.{name} is deprecated, use PromptManager.{newname}\n".format(
+        warn("InteractiveShell.{name} is deprecated, use PromptManager.{newname}".format(
                 name=name, newname=table[name])
         )
         # protect against weird cases where self.config may not exist:
@@ -347,6 +356,7 @@ class InteractiveShell(SingletonConfigurable):
     # but for now, we can't do that as readline is welded in everywhere.
     readline_use = CBool(True, config=True)
     readline_remove_delims = Unicode('-/~', config=True)
+    readline_delims = Unicode() # set by init_readline()
     # don't use \M- bindings by default, because they
     # conflict with 8-bit encodings. See gh-58,gh-88
     readline_parse_and_bind = List([
@@ -478,7 +488,6 @@ class InteractiveShell(SingletonConfigurable):
         self.init_display_pub()
         self.init_data_pub()
         self.init_displayhook()
-        self.init_reload_doctest()
         self.init_latextool()
         self.init_magics()
         self.init_logstart()
@@ -671,14 +680,6 @@ class InteractiveShell(SingletonConfigurable):
         # the appropriate time.
         self.display_trap = DisplayTrap(hook=self.displayhook)
 
-    def init_reload_doctest(self):
-        # Do a proper resetting of doctest, including the necessary displayhook
-        # monkeypatching
-        try:
-            doctest_reload()
-        except ImportError:
-            warn("doctest module does not exist.")
-
     def init_latextool(self):
         """Configure LaTeXTool."""
         cfg = LaTeXTool.instance(config=self.config)
@@ -705,7 +706,7 @@ class InteractiveShell(SingletonConfigurable):
             return
         
         warn("Attempting to work in a virtualenv. If you encounter problems, please "
-             "install IPython inside the virtualenv.\n")
+             "install IPython inside the virtualenv.")
         if sys.platform == "win32":
             virtual_env = os.path.join(os.environ['VIRTUAL_ENV'], 'Lib', 'site-packages') 
         else:
@@ -1521,7 +1522,7 @@ class InteractiveShell(SingletonConfigurable):
         self.InteractiveTB = ultratb.AutoFormattedTB(mode = 'Plain',
                                                      color_scheme='NoColor',
                                                      tb_offset = 1,
-                                   check_cache=self.compile.check_cache)
+                                   check_cache=check_linecache_ipython)
 
         # The instance will store a pointer to the system-wide exception hook,
         # so that runtime code (such as magics) can access it.  This is because
@@ -1855,6 +1856,9 @@ class InteractiveShell(SingletonConfigurable):
                 delims = delims.replace(d, "")
             delims = delims.replace(ESC_MAGIC, '')
             readline.set_completer_delims(delims)
+            # Store these so we can restore them if something like rpy2 modifies
+            # them.
+            self.readline_delims = delims
             # otherwise we end up with a monster history after a while:
             readline.set_history_length(self.history_length)
 
@@ -1883,15 +1887,16 @@ class InteractiveShell(SingletonConfigurable):
                                                                 stdin_encoding))
                 last_cell = cell
 
+    @skip_doctest
     def set_next_input(self, s):
         """ Sets the 'default' input string for the next command line.
 
         Requires readline.
 
-        Example:
+        Example::
 
-        [D:\ipython]|1> _ip.set_next_input("Hello Word")
-        [D:\ipython]|2> Hello Word_  # cursor is here
+            In [1]: _ip.set_next_input("Hello Word")
+            In [2]: Hello Word_  # cursor is here
         """
         self.rl_next_input = py3compat.cast_bytes_py2(s)
 
@@ -2027,7 +2032,7 @@ class InteractiveShell(SingletonConfigurable):
     def init_magics(self):
         from IPython.core import magics as m
         self.magics_manager = magic.MagicsManager(shell=self,
-                                   confg=self.config,
+                                   config=self.config,
                                    user_magics=m.UserMagics(self))
         self.configurables.append(self.magics_manager)
 
@@ -2047,6 +2052,8 @@ class InteractiveShell(SingletonConfigurable):
         mman.register_alias('ed', 'edit')
         mman.register_alias('hist', 'history')
         mman.register_alias('rep', 'recall')
+        mman.register_alias('SVG', 'svg', 'cell')
+        mman.register_alias('HTML', 'html', 'cell')
 
         # FIXME: Move the color initialization to the DisplayHook, which
         # should be split into a prompt manager and displayhook. We probably
@@ -2104,10 +2111,13 @@ class InteractiveShell(SingletonConfigurable):
         fn = self.find_cell_magic(magic_name)
         if fn is None:
             lm = self.find_line_magic(magic_name)
-            etpl = "Cell magic function `%%%%%s` not found%s."
-            extra = '' if lm is None else (' (But line magic `%%%s` exists, '
-                                    'did you mean that instead?)' % magic_name )
-            error(etpl % (magic_name, extra))
+            etpl = "Cell magic function `%%{0}` not found{1}."
+            extra = '' if lm is None else (' (But line magic `%{0}` exists, '
+                            'did you mean that instead?)'.format(magic_name))
+            error(etpl.format(magic_name, extra))
+        elif cell == '':
+            raise UsageError('%%{0} (with double %) expects code beneath it. '
+                            'Did you mean %{0} (single %)?'.format(magic_name))
         else:
             # Note: this is the distance in the stack to the user's frame.
             # This will need to be updated if the internal calling logic gets
@@ -2231,6 +2241,10 @@ class InteractiveShell(SingletonConfigurable):
         else:
             cmd = py3compat.unicode_to_str(cmd)
             ec = os.system(cmd)
+            # The high byte is the exit code, the low byte is a signal number
+            # that we discard for now. See the docs for os.wait()
+            if ec > 255:
+                ec >>= 8
         
         # We explicitly do NOT return the subprocess status code, because
         # a non-None value would trigger :func:`sys.displayhook` calls.
@@ -2461,7 +2475,7 @@ class InteractiveShell(SingletonConfigurable):
                 # explicitly silenced, but only in short form.
                 if kw['raise_exceptions']:
                     raise
-                if status.code not in (0, None) and not kw['exit_ignore']:
+                if status.code and not kw['exit_ignore']:
                     self.showtraceback(exception_only=True)
             except:
                 if kw['raise_exceptions']:
@@ -2499,7 +2513,7 @@ class InteractiveShell(SingletonConfigurable):
                     # raised in user code.  It would be nice if there were
                     # versions of runlines, execfile that did raise, so
                     # we could catch the errors.
-                    self.run_cell(thefile.read(), store_history=False)
+                    self.run_cell(thefile.read(), store_history=False, shell_futures=False)
             except:
                 self.showtraceback()
                 warn('Unknown failure executing file: <%s>' % fname)
@@ -2510,6 +2524,8 @@ class InteractiveShell(SingletonConfigurable):
         This version will never throw an exception, but instead print
         helpful error messages to the screen.
 
+        `SystemExit` exceptions with status code 0 or None are ignored.
+
         Parameters
         ----------
         mod_name : string
@@ -2518,10 +2534,14 @@ class InteractiveShell(SingletonConfigurable):
             The globals namespace.
         """
         try:
-            where.update(
-                runpy.run_module(str(mod_name), run_name="__main__",
-                                 alter_sys=True)
-                )
+            try:
+                where.update(
+                    runpy.run_module(str(mod_name), run_name="__main__",
+                                     alter_sys=True)
+                    )
+            except SystemExit as status:
+                if status.code:
+                    raise
         except:
             self.showtraceback()
             warn('Unknown failure executing module: <%s>' % mod_name)
@@ -2533,7 +2553,7 @@ class InteractiveShell(SingletonConfigurable):
         self._current_cell_magic_body = None
         return self.run_cell_magic(magic_name, line, cell)
 
-    def run_cell(self, raw_cell, store_history=False, silent=False):
+    def run_cell(self, raw_cell, store_history=False, silent=False, shell_futures=True):
         """Run a complete IPython cell.
 
         Parameters
@@ -2547,6 +2567,11 @@ class InteractiveShell(SingletonConfigurable):
         silent : bool
           If True, avoid side-effects, such as implicit displayhooks and
           and logging.  silent=True forces store_history=False.
+        shell_futures : bool
+          If True, the code will share future statements with the interactive
+          shell. It will both be affected by previous __future__ imports, and
+          any __future__ imports in the code will affect the shell. If False,
+          __future__ imports are not shared in either direction.
         """
         if (not raw_cell) or raw_cell.isspace():
             return
@@ -2564,6 +2589,11 @@ class InteractiveShell(SingletonConfigurable):
             self._current_cell_magic_body = \
                                ''.join(self.input_splitter.cell_magic_parts)
         cell = self.input_splitter.source_reset()
+        
+        # Our own compiler remembers the __future__ environment. If we want to
+        # run code with a separate __future__ environment, use the default
+        # compiler
+        compiler = self.compile if shell_futures else CachingCompiler()
 
         with self.builtin_trap:
             prefilter_failed = False
@@ -2593,8 +2623,7 @@ class InteractiveShell(SingletonConfigurable):
 
                 with self.display_trap:
                     try:
-                        code_ast = self.compile.ast_parse(cell,
-                                                          filename=cell_name)
+                        code_ast = compiler.ast_parse(cell, filename=cell_name)
                     except IndentationError:
                         self.showindentationerror()
                         if store_history:
@@ -2607,9 +2636,11 @@ class InteractiveShell(SingletonConfigurable):
                             self.execution_count += 1
                         return None
                     
+                    code_ast = self.transform_ast(code_ast)
+                    
                     interactivity = "none" if silent else self.ast_node_interactivity
                     self.run_ast_nodes(code_ast.body, cell_name,
-                                       interactivity=interactivity)
+                                       interactivity=interactivity, compiler=compiler)
                     
                     # Execute any registered post-execution functions.
                     # unless we are silent
@@ -2639,8 +2670,36 @@ class InteractiveShell(SingletonConfigurable):
             self.history_manager.store_output(self.execution_count)
             # Each cell is a *single* input, regardless of how many lines it has
             self.execution_count += 1
+    
+    def transform_ast(self, node):
+        """Apply the AST transformations from self.ast_transformers
+        
+        Parameters
+        ----------
+        node : ast.Node
+          The root node to be transformed. Typically called with the ast.Module
+          produced by parsing user input.
+        
+        Returns
+        -------
+        An ast.Node corresponding to the node it was called with. Note that it
+        may also modify the passed object, so don't rely on references to the
+        original AST.
+        """
+        for transformer in self.ast_transformers:
+            try:
+                node = transformer.visit(node)
+            except Exception:
+                warn("AST transformer %r threw an error. It will be unregistered." % transformer)
+                self.ast_transformers.remove(transformer)
+        
+        if self.ast_transformers:
+            ast.fix_missing_locations(node)
+        return node
+                
 
-    def run_ast_nodes(self, nodelist, cell_name, interactivity='last_expr'):
+    def run_ast_nodes(self, nodelist, cell_name, interactivity='last_expr',
+                        compiler=compile):
         """Run a sequence of AST nodes. The execution mode depends on the
         interactivity parameter.
 
@@ -2657,6 +2716,9 @@ class InteractiveShell(SingletonConfigurable):
           will run the last node interactively only if it is an expression (i.e.
           expressions in loops or other blocks are not displayed. Other values
           for this parameter will raise a ValueError.
+        compiler : callable
+          A function with the same interface as the built-in compile(), to turn
+          the AST nodes into code objects. Default is the built-in compile().
         """
         if not nodelist:
             return
@@ -2681,13 +2743,13 @@ class InteractiveShell(SingletonConfigurable):
         try:
             for i, node in enumerate(to_run_exec):
                 mod = ast.Module([node])
-                code = self.compile(mod, cell_name, "exec")
+                code = compiler(mod, cell_name, "exec")
                 if self.run_code(code):
                     return True
 
             for i, node in enumerate(to_run_interactive):
                 mod = ast.Interactive([node])
-                code = self.compile(mod, cell_name, "single")
+                code = compiler(mod, cell_name, "single")
                 if self.run_code(code):
                     return True
 
@@ -2770,12 +2832,11 @@ class InteractiveShell(SingletonConfigurable):
         This turns on support for matplotlib, preloads into the interactive
         namespace all of numpy and pylab, and configures IPython to correctly
         interact with the GUI event loop.  The GUI backend to be used can be
-        optionally selected with the optional :param:`gui` argument.
+        optionally selected with the optional ``gui`` argument.
 
         Parameters
         ----------
         gui : optional, string
-
           If given, dictates the choice of matplotlib GUI backend to use
           (should be one of IPython's supported backends, 'qt', 'osx', 'tk',
           'gtk', 'wx' or 'inline'), otherwise we use the default chosen by
@@ -2794,6 +2855,10 @@ class InteractiveShell(SingletonConfigurable):
             gui = pylab_activate(ns, gui, import_all, self, welcome_message=welcome_message)
         except KeyError:
             error("Backend %r not supported" % gui)
+            return
+        except ImportError:
+            error("pylab mode doesn't work as matplotlib could not be found." + \
+                  "\nIs it installed on the system?")
             return
         self.user_ns.update(ns)
         self.user_ns_hidden.update(ns)
@@ -2930,7 +2995,8 @@ class InteractiveShell(SingletonConfigurable):
                 return openpy.read_py_url(utarget, skip_encoding_cookie=skip_encoding_cookie)
         except UnicodeDecodeError:
             if not py_only :
-                response = urllib.urlopen(target)
+                from urllib import urlopen  # Deferred import
+                response = urlopen(target)
                 return response.read().decode('latin1')
             raise ValueError(("'%s' seem to be unreadable.") % utarget)
 

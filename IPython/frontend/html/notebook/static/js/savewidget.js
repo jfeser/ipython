@@ -25,8 +25,8 @@ var IPython = (function (IPython) {
 
     SaveWidget.prototype.style = function () {
         this.element.find('span#save_widget').addClass('ui-widget');
-        this.element.find('span#notebook_name').addClass('ui-widget ui-widget-content');
-        this.element.find('span#save_status').addClass('ui-widget ui-widget-content')
+        this.element.find('span#notebook_name').addClass('ui-widget');
+        this.element.find('span#save_status').addClass('ui-widget')
             .css({border: 'none', 'margin-left': '20px'});
     };
 
@@ -127,7 +127,7 @@ var IPython = (function (IPython) {
 
     SaveWidget.prototype.set_last_saved = function () {
         var d = new Date();
-        this.set_save_status('Last saved: '+d.format('mmm dd h:MM TT'));
+        this.set_save_status('Last saved: '+d.format('mmm dd HH:MM'));
     };
 
 
